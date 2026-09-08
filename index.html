@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>A SIMPLE VISTA:</title>
+
+<!-- Google Fonts: Syne -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+
+<!-- StPageFlip: librería de flipbook 100% gratuita (MIT), sin marcas de agua,
+     con volteo 3D real, esquinas arrastrables y sombras dinámicas de lomo. -->
+<script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.min.js"></script>
+
+<style>
+  :root{
+    --bg:#333333;         /* K:80 — único fondo de toda la página */
+    --ink:#1C1C1C;          /* K:90 */
+    --player-bg:#E3E3E3;   /* blanco roto */
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:var(--bg);
+    font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;
+    overflow:hidden;
+  }
+
+  /* ============================================================
+     ESCENARIO — la revista es la protagonista, fondo único #333333
+     ============================================================ */
+  #stage{
+    position:fixed;
+    top:0; left:0; right:0;
+    bottom:100px; /* espacio para la tarjeta flotante del reproductor */
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--bg);
+  }
+
+  /* Contenedor delimitador: 85% de ancho, 72vh de alto.
+     StPageFlip (modo "stretch") calcula el tamaño real del libro
+     dentro de estos límites preservando siempre la proporción
+     612x792 del PDF, por lo que nunca se deforma. */
+  #book-outer{
+    position:relative;
+    width:85%;
+    height:72vh;
+    margin-top:40px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+
+  #book{ position:relative; }
+
+  /* Contenedor de cada página en modo HTML (loadFromHTML): sin
+     padding/margen que encoja la imagen, fondo blanco opaco */
+  #book .my-page{
+    width:100%;
+    height:100%;
+    margin:0;
+    padding:0;
+    background:#FFFFFF;
+    overflow:hidden;
+    box-shadow:none !important;
+  }
+
+  /* Imagen real (no canvas): nitidez nativa. object-fit:cover en vez
+     de contain: rellena todo el lienzo sin franjas blancas, a costa
+     de recortar levemente el borde de la imagen si su proporción no
+     coincide exacto con la del contenedor (compromiso pedido
+     explícitamente para eliminar los márgenes de portada/contraportada) */
+  #book .my-page img{
+    display:block;
+    width:100% !important;
+    height:100% !important;
+    object-fit:cover !important;
+    image-rendering:-webkit-optimize-contrast; /* Safari/Chrome: nitidez al reducir fotos */
+    image-rendering:crisp-edges;               /* Firefox: evita el suavizado agresivo */
+    transform:translateZ(0);                    /* fuerza aceleración por hardware/GPU */
+    box-shadow:none !important;
+  }
+
+  /* Reglas exactas solicitadas: transparenta cualquier fondo de
+     página que pudiera asomar por detrás de la imagen. Esto incluye
+     a nuestro propio .my-page (su clase contiene "page"), lo cual
+     es intencional y no rompe nada: la imagen con cover ya rellena
+     el 100% del lienzo. */
+  .page,
+  .stPageFlip--page,
+  [class*="page"]{
+    background:transparent !important;
+    box-shadow:none !important;
+  }
+
+  /* Sombra de lomo propia — DESACTIVADA por pedido explícito.
+     Nota: la sombra de la librería ya se neutralizó en el parche
+     anterior (canvas + drawShadow:false). Si la línea central
+     seguía viéndose después de eso, no podía ser de la librería:
+     tenía que ser este div nuestro (usa id, no class, por eso los
+     selectores [class*="spine"] de abajo no lo alcanzan). */
+  #spine-shadow{ display:none !important; }
+
+  /* ============================================================
+     ANULACIÓN TOTAL DE LA SOMBRA GENERADA POR LA LIBRERÍA
+     El parche anterior (solo clases .stf__outerShadow, etc.) no
+     bastó porque StPageFlip dibuja el brillo/sombra dinámica del
+     volteo sobre un <canvas> interno (.stf__parent canvas), no
+     solo mediante esos divs con clase. Esta regla cubre ambos
+     frentes, escopeada a #book para no afectar ningún otro
+     elemento de la página:
+     ============================================================ */
+  #book canvas,
+  #book .stf__outerShadow,
+  #book .stf__innerShadow,
+  #book .stf__hardShadow,
+  #book .stf__hardInnerShadow,
+  #book [class*="shadow" i],
+  #book [class*="gradient" i]{
+    display:none !important;
+    opacity:0 !important;
+    background:none !important;
+    box-shadow:none !important;
+  }
+
+  /* Reglas exactas solicitadas: nombres de clase adicionales por si
+     alguna versión del bundle los usa, más el caso genérico */
+  .stPageFlip--spine,
+  .stPageFlip--lomo,
+  [class*="spine"],
+  [class*="lomo"]{
+    background:transparent !important;
+    background-image:none !important;
+    box-shadow:none !important;
+    opacity:0 !important;
+    display:none !important;
+  }
+
+  /* Sombra suave de contacto bajo el libro (papel "flotando" limpio) */
+  #book-shadow-floor{
+    position:absolute;
+    left:8%; right:8%; bottom:-3%;
+    height:6%;
+    background:radial-gradient(ellipse at center, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0) 72%);
+    filter:blur(3px);
+    pointer-events:none;
+    z-index:1;
+  }
+
+  /* Flechas de navegación discretas */
+  .side-nav{
+    position:absolute;
+    top:50%; transform:translateY(-50%);
+    width:44px; height:44px;
+    border-radius:50%;
+    border:1.4px solid rgba(255,255,255,0.6);
+    background:rgba(0,0,0,0.2);
+    color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    z-index:60;
+    transition:opacity .15s ease, transform .15s ease, background .15s ease;
+    opacity:.65;
+  }
+  .side-nav:hover{ opacity:1; background:rgba(0,0,0,0.35); }
+  .side-nav:active{ transform:translateY(-50%) scale(0.92); }
+  .side-nav.disabled{ opacity:.08; pointer-events:none; }
+  .side-nav svg{ width:16px; height:16px; fill:#fff; }
+  #navPrev{ left:-6px; }
+  #navNext{ right:-6px; }
+
+  @media (min-width:900px){
+    #navPrev{ left:-60px; }
+    #navNext{ right:-60px; }
+  }
+
+  #pageIndicator{
+    position:absolute;
+    bottom:-30px; left:0; right:0;
+    text-align:center;
+    font-family:'Syne',sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:rgba(255,255,255,0.5);
+  }
+
+  /* Indicador de página ("Portada", "Páginas 8 – 9"...) — OCULTO
+     por pedido explícito. Nota: esto es un div propio nuestro
+     (#pageIndicator, con id, no class) que añadimos varios turnos
+     atrás; StPageFlip no dibuja texto de paginación por sí sola,
+     así que los selectores de clase de abajo nunca lo habrían
+     alcanzado — de ahí que lo oculte aquí directamente. */
+  #pageIndicator{ display:none !important; }
+
+  /* Reglas exactas solicitadas — red de seguridad genérica por si
+     alguna versión del bundle sí inyecta su propio contador */
+  .stPageFlip--pageLabel,
+  .stPageFlip-label,
+  [class*="label"],
+  [class*="page-number"],
+  [class*="counter"]{
+    display:none !important;
+    opacity:0 !important;
+    visibility:hidden !important;
+    height:0 !important;
+    margin:0 !important;
+  }
+
+  /* ============================================================
+     REPRODUCTOR — tarjeta flotante compacta, ajustada al texto
+     ============================================================ */
+  #player{
+    position:fixed;
+    left:50%; bottom:28px;
+    transform:translateX(-50%);
+    width:max-content;
+    max-width:92vw;
+    background:var(--player-bg);
+    display:flex;
+    align-items:center;
+    gap:14px;
+    padding:10px 24px;
+    border-radius:30px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.45);
+    overflow:hidden;
+    z-index:500;
+  }
+
+  /* <audio> nativa oculta por completo: todo el control pasa
+     por los botones de diseño propio */
+  #nativeAudio{ display:none; }
+
+  /* Barra de progreso: ahora forma parte del flujo flex (antes su
+     ancho lo determinaba el texto de la frase, ya eliminado, así
+     que pasa de position:absolute de borde a borde a un elemento
+     con ancho propio junto al botón) */
+  #progressBar{
+    position:relative;
+    width:150px;
+    height:3px;
+    background:rgba(28,28,28,0.14);
+    border-radius:2px;
+    cursor:pointer;
+  }
+  #progressFill{
+    position:absolute; top:0; left:0; bottom:0;
+    width:0%;
+    background:var(--ink);
+    border-radius:2px;
+  }
+  #progressBar:hover{ height:5px; }
+
+  #playBtn{
+    flex:0 0 auto;
+    width:30px; height:30px;
+    border-radius:50%;
+    border:1.4px solid var(--ink);
+    background:transparent;
+    color:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  #playBtn svg{ width:11px; height:11px; fill:var(--ink); }
+
+  @media (max-width:480px){
+    #progressBar{ width:110px; }
+    #player{ padding:9px 18px; gap:10px; bottom:18px; }
+  }
+</style>
+</head>
+<body>
+
+  <div id="stage">
+    <div id="book-outer">
+      <div id="book"></div>
+      <div id="spine-shadow"></div>
+      <div id="book-shadow-floor"></div>
+
+      <div class="side-nav disabled" id="navPrev" title="Página anterior">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7z"/></svg>
+      </div>
+      <div class="side-nav" id="navNext" title="Página siguiente">
+        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7z"/></svg>
+      </div>
+
+      <div id="pageIndicator">Portada</div>
+    </div>
+  </div>
+
+  <!-- REPRODUCTOR INFERIOR -->
+  <div id="player">
+    <audio id="nativeAudio" src="musica.mp3" preload="metadata" loop></audio>
+
+    <button id="playBtn" aria-label="Reproducir">
+      <svg id="iconPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      <svg id="iconPause" viewBox="0 0 24 24" style="display:none"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+    </button>
+
+    <div id="progressBar"><div id="progressFill"></div></div>
+  </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+
+/* ================================================================
+   PÁGINAS — se construyen como <div class="my-page"><img></div>
+   reales dentro de #book (modo loadFromHTML), en vez de dibujarlas
+   en un <canvas> interno como hacía loadFromImages(). Esto es lo
+   que permite que el navegador las renderice con nitidez nativa y
+   que nuestro CSS (object-fit, image-rendering) tenga efecto real.
+   ================================================================ */
+const bookEl = document.getElementById("book");
+const bookOuter = document.getElementById("book-outer");
+
+const fileNames = [];
+fileNames.push("portada.jpg");
+for (let i = 2; i <= 43; i++) fileNames.push("pagina" + i + ".jpg");
+fileNames.push("contraportada.jpg");
+
+fileNames.forEach((src, idx) => {
+  const pageDiv = document.createElement("div");
+  pageDiv.className = "my-page";
+  if (idx === 0 || idx === fileNames.length - 1){
+    pageDiv.setAttribute("data-density", "hard"); // portada / contraportada
+  }
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = "";
+  img.draggable = false;
+  pageDiv.appendChild(img);
+  bookEl.appendChild(pageDiv);
+});
+
+/* ================================================================
+   INICIALIZACIÓN DE StPageFlip
+   Tamaño de contenedor restaurado a la versión ideal (base 600x800,
+   mínimos moderados) — el bump a 900x1200/min 800x1067 del parche
+   anterior forzaba a la librería a violar la altura del contenedor
+   y caer en modo "una sola página" de emergencia, produciendo la
+   plana gigante desbordada que viste.
+
+   Corrección de estructura: StPageFlip no tiene un parámetro
+   literal "mode: double" — su equivalente funcional es
+   usePortrait:false, que impide que la librería caiga alguna vez
+   al modo de página única por ancho de pantalla y fuerza el modo
+   libro (doble página) de forma permanente. Junto con
+   showCover:true, esto deja portada y contraportada solas, y todo
+   el interior siempre en pares (izquierda) / impares (derecha),
+   con la sombra de lomo cayendo exactamente en la unión de ambas
+   páginas — no atravesando una plana suelta.
+   ================================================================ */
+const pageFlip = new St.PageFlip(bookEl, {
+  width: 1200,
+  height: 1600,
+  size: "stretch",
+  minWidth: 500,             // sin cambios: subir este valor fue lo que
+  minHeight: 660,             // colapsó el libro a página única antes
+  maxWidth: 2000,
+  maxHeight: 2667,
+  showCover: true,          // portada y contraportada solas
+  usePortrait: false,       // fuerza el modo libro (doble página) siempre
+  autoSize: false,          // el libro se ajusta al contenedor, no al revés
+  drawShadow: false,        // apaga el degradado dinámico de sombra/lomo
+  maxShadowOpacity: 0,      // redundante con drawShadow:false, por seguridad
+  flippingTime: 780,
+  mobileScrollSupport: false,
+  swipeDistance: 20,
+  clickEventForward: true,
+  useMouseEvents: true
+});
+
+pageFlip.loadFromHTML(document.querySelectorAll("#book .my-page"));
+
+/* ---------- Indicador de página + flechas + sombra de lomo ---------- */
+const pageIndicator = document.getElementById("pageIndicator");
+const navPrev = document.getElementById("navPrev");
+const navNext = document.getElementById("navNext");
+
+function updateUI(){
+  const cur = pageFlip.getCurrentPageIndex();
+  const count = pageFlip.getPageCount();
+
+  if (cur <= 0){
+    pageIndicator.textContent = "Portada";
+    bookOuter.classList.remove("interior");
+  } else if (cur >= count - 1){
+    pageIndicator.textContent = "Contraportada";
+    bookOuter.classList.remove("interior");
+  } else {
+    const left = cur + 1;
+    const right = Math.min(cur + 2, count);
+    pageIndicator.textContent = "Páginas " + left + " – " + right;
+    bookOuter.classList.add("interior");
+  }
+
+  navPrev.classList.toggle("disabled", cur <= 0);
+  navNext.classList.toggle("disabled", cur >= count - 1);
+}
+
+pageFlip.on("init", updateUI);
+pageFlip.on("flip", updateUI);
+pageFlip.on("changeOrientation", updateUI);
+
+navPrev.addEventListener("click", () => pageFlip.flipPrev());
+navNext.addEventListener("click", () => pageFlip.flipNext());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") pageFlip.flipNext();
+  if (e.key === "ArrowLeft") pageFlip.flipPrev();
+});
+
+/* ================================================================
+   REPRODUCTOR INFERIOR — controla el <audio> oculto desde el botón
+   propio. Sin ningún intento de reproducción automática: el método
+   .play() nativo solo se llama dentro del gesto real de clic del
+   usuario sobre el botón, que es lo único que los navegadores
+   modernos permiten sin bloquear.
+   ================================================================ */
+const audio = document.getElementById("nativeAudio");
+const playBtn = document.getElementById("playBtn");
+const iconPlay = document.getElementById("iconPlay");
+const iconPause = document.getElementById("iconPause");
+const progressBar = document.getElementById("progressBar");
+const progressFill = document.getElementById("progressFill");
+
+playBtn.addEventListener("click", () => {
+  if (audio.paused){
+    audio.play().catch((err) => {
+      console.warn("No se pudo reproducir el audio:", err);
+    });
+  } else {
+    audio.pause();
+  }
+});
+
+audio.addEventListener("play", () => {
+  iconPlay.style.display = "none";
+  iconPause.style.display = "block";
+});
+audio.addEventListener("pause", () => {
+  iconPlay.style.display = "block";
+  iconPause.style.display = "none";
+});
+audio.addEventListener("timeupdate", () => {
+  const pct = audio.duration ? (audio.currentTime / audio.duration * 100) : 0;
+  progressFill.style.width = pct + "%";
+});
+
+function seek(e){
+  const rect = progressBar.getBoundingClientRect();
+  const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+  const pct = Math.min(1, Math.max(0, x / rect.width));
+  if (audio.duration) audio.currentTime = pct * audio.duration;
+}
+let seeking = false;
+progressBar.addEventListener("mousedown", (e) => { seeking = true; seek(e); });
+window.addEventListener("mousemove", (e) => { if (seeking) seek(e); });
+window.addEventListener("mouseup", () => { seeking = false; });
+progressBar.addEventListener("touchstart", seek);
+progressBar.addEventListener("touchmove", seek);
+
+}); // fin de DOMContentLoaded
+</script>
+</body>
+</html>
